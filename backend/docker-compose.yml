@@ -1,0 +1,58 @@
+# Full stack for local demo: API + worker + PostgreSQL + Redis
+#   docker compose up --build
+#   API docs: http://localhost:8000/docs
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: avg
+      POSTGRES_PASSWORD: avg
+      POSTGRES_DB: avg
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U avg"]
+      interval: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 20
+
+  api:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://avg:avg@db:5432/avg
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_MODE: rq
+    ports:
+      - "8000:8000"
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  worker:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://avg:avg@db:5432/avg
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_MODE: rq
+    command: ["sh", "-c", "rq worker avg --url $$REDIS_URL"]
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      api: { condition: service_started }
+    # scale analysis workers independently of the API (NFR scalability):
+    #   docker compose up --scale worker=3
+
+volumes:
+  pgdata:
